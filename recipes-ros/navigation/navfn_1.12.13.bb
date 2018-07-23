@@ -7,4 +7,5 @@ LIC_FILES_CHKSUM = "file://package.xml;beginline=19;endline=19;md5=01c2bc31767cc
 DEPENDS = "costmap-2d geometry-msgs nav-core nav-msgs pcl-conversions pcl-ros \
     pluginlib rosconsole roscpp tf visualization-msgs"
 
+LDFLAGS += "-lpthread"
 require navigation.inc

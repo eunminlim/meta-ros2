@@ -1,0 +1,277 @@
+From b02f91cc1eb87ce09a5a952a32d6869e07ad7a0d Mon Sep 17 00:00:00 2001
+From: Kirill Dmitriev <kirill.dmitriev@lge.com>
+Date: Mon, 13 Jul 2015 15:27:03 +0300
+Subject: [PATCH 1/3] Raw device added
+
+Upstream status: not applicable
+
+:Release Notes:
+Added functions that let user create a cairo EGL device using existing egl surface.
+
+:Detailed Notes:
+Default cairo GL ES backend implementation creates a separate surface for each instance, and
+calls eglMakeCurrent, eglSwapBuffers, etc. each time when it performs drawing. We could
+relieve cairo of responsibility to manage EGL structures and let it only issue GL ES commands
+while managing EGL other way.
+This patch provides an additional call "cairo_egl_device_create_raw()" that creates a GL ES
+cairo_device_t which doesn't issue EGL calls. It also adds a function "cairo_gl_surface_create_for_fbo()"
+to the set of "cairo_gl_surface_create_for_X()", all of which can be used with the pointer returned by
+"cairo_egl_device_create_raw()".
+
+:Testing Performed:
+
+:QA Notes:
+
+:Issues Addressed:
+PLAT-1084
+---
+ src/cairo-egl-context.c        | 55 +++++++++++++++++++++++++++++++
+ src/cairo-gl-device.c          |  3 +-
+ src/cairo-gl-msaa-compositor.c | 21 +-----------
+ src/cairo-gl-surface.c         | 73 ++++++++++++++++++++++++++++++++++++++++++
+ src/cairo-gl.h                 | 12 +++++++
+ 5 files changed, 142 insertions(+), 22 deletions(-)
+
+diff --git a/src/cairo-egl-context.c b/src/cairo-egl-context.c
+index bf704c6..022a85e 100644
+--- a/src/cairo-egl-context.c
++++ b/src/cairo-egl-context.c
+@@ -155,6 +155,22 @@ _egl_destroy (void *abstract_ctx)
+         eglDestroySurface (ctx->display, ctx->dummy_surface);
+ }
+ 
++static void
++_egl_nop(void *x)
++{
++    // Do nothing
++    (void)x;
++}
++
++static void
++_egl_nop_2 (void *x,
++            cairo_gl_surface_t *y)
++{
++    // Do nothing with 2 arguments
++    (void)x;
++    (void)y;
++}
++
+ static cairo_bool_t
+ _egl_make_current_surfaceless(cairo_egl_context_t *ctx)
+ {
+@@ -283,6 +299,45 @@ cairo_gl_surface_create_for_egl (cairo_device_t	*device,
+     return &surface->base.base;
+ }
+ 
++cairo_device_t *
++cairo_egl_device_create_raw()
++{
++    cairo_egl_context_t *ctx;
++    cairo_status_t status;
++
++    ctx = calloc (1, sizeof (cairo_egl_context_t));
++    if (unlikely (ctx == NULL))
++        return _cairo_gl_context_create_in_error (CAIRO_STATUS_NO_MEMORY);
++
++    ctx->display = EGL_NO_DISPLAY;
++    ctx->context = EGL_NO_CONTEXT;
++    ctx->dummy_surface = EGL_NO_SURFACE;
++
++    ctx->base.acquire = _egl_nop;
++    ctx->base.release = _egl_nop;
++    ctx->base.make_current = _egl_nop_2;
++    ctx->base.swap_buffers = _egl_nop_2;
++    ctx->base.destroy = _egl_nop;
++
++    //_egl_query_current_state (ctx);
++    ctx->previous_context = EGL_NO_CONTEXT;
++    ctx->previous_surface = EGL_NO_SURFACE;
++
++    status = _cairo_gl_dispatch_init (&ctx->base.dispatch, eglGetProcAddress);
++    if (unlikely (status)) {
++        free (ctx);
++        return _cairo_gl_context_create_in_error (status);
++    }
++
++    status = _cairo_gl_context_init (&ctx->base);
++    if (unlikely (status)) {
++        free (ctx);
++        return _cairo_gl_context_create_in_error (status);
++    }
++
++    return &ctx->base.base;
++}
++
+ static cairo_bool_t is_egl_device (cairo_device_t *device)
+ {
+     return (device->backend != NULL &&
+diff --git a/src/cairo-gl-device.c b/src/cairo-gl-device.c
+index 7235d9a..68384b8 100644
+--- a/src/cairo-gl-device.c
++++ b/src/cairo-gl-device.c
+@@ -160,8 +160,7 @@ static const cairo_device_backend_t _cairo_gl_device_backend = {
+ static cairo_bool_t
+ _cairo_gl_msaa_compositor_enabled (void)
+ {
+-    const char *env = getenv ("CAIRO_GL_COMPOSITOR");
+-    return env && strcmp(env, "msaa") == 0;
++    return TRUE;
+ }
+ 
+ static cairo_bool_t
+diff --git a/src/cairo-gl-msaa-compositor.c b/src/cairo-gl-msaa-compositor.c
+index 83e8eb2..543959a 100644
+--- a/src/cairo-gl-msaa-compositor.c
++++ b/src/cairo-gl-msaa-compositor.c
+@@ -273,26 +273,7 @@ static cairo_bool_t
+ can_use_msaa_compositor (cairo_gl_surface_t *surface,
+ 			 cairo_antialias_t antialias)
+ {
+-    query_surface_capabilities (surface);
+-    if (! surface->supports_stencil)
+-	return FALSE;
+-
+-    /* Multisampling OpenGL ES surfaces only maintain one multisampling
+-       framebuffer and thus must use the spans compositor to do non-antialiased
+-       rendering. */
+-    if (((cairo_gl_context_t *) surface->base.device)->gl_flavor == CAIRO_GL_FLAVOR_ES
+-	 && surface->supports_msaa
+-	 && antialias == CAIRO_ANTIALIAS_NONE)
+-	return FALSE;
+-
+-    /* The MSAA compositor has a single-sample mode, so we can
+-       support non-antialiased rendering. */
+-    if (antialias == CAIRO_ANTIALIAS_NONE)
+-	return TRUE;
+-
+-    if (antialias == CAIRO_ANTIALIAS_FAST || antialias == CAIRO_ANTIALIAS_DEFAULT)
+-	return surface->supports_msaa;
+-    return FALSE;
++    return TRUE;
+ }
+ 
+ static void
+diff --git a/src/cairo-gl-surface.c b/src/cairo-gl-surface.c
+index cfccf4d..a68c24a 100644
+--- a/src/cairo-gl-surface.c
++++ b/src/cairo-gl-surface.c
+@@ -444,6 +444,39 @@ _cairo_gl_surface_create_scratch_for_texture (cairo_gl_context_t   *ctx,
+ }
+ 
+ static cairo_surface_t *
++_cairo_gl_surface_create_scratch_for_fbo(cairo_gl_context_t  *ctx,
++        cairo_content_t      content,
++        GLuint               fbo,
++        GLuint               depth_stencil,
++        int                  width,
++        int                  height,
++        int                  samples)
++{
++    cairo_gl_surface_t *surface;
++
++    surface = calloc (1, sizeof (cairo_gl_surface_t));
++    if (unlikely (surface == NULL))
++        return _cairo_surface_create_in_error (_cairo_error (CAIRO_STATUS_NO_MEMORY));
++
++    surface->fb = fbo;
++    if (depth_stencil) {
++        surface->depth_stencil = depth_stencil;
++        surface->msaa_depth_stencil = TRUE;
++    }
++    surface->tex = fbo;
++    _cairo_gl_surface_init (&ctx->base, surface, content, width, height);
++
++    surface->supports_msaa = ctx->supports_msaa;
++    if (samples > 0) {
++        surface->msaa_active = ctx->supports_msaa;
++    }
++    surface->supports_stencil = TRUE;
++    surface->owns_tex = FALSE;
++
++    return &surface->base;
++}
++
++static cairo_surface_t *
+ _create_scratch_internal (cairo_gl_context_t *ctx,
+ 			  cairo_content_t content,
+ 			  int width,
+@@ -698,6 +731,46 @@ cairo_gl_surface_create_for_texture (cairo_device_t	*abstract_device,
+ }
+ slim_hidden_def (cairo_gl_surface_create_for_texture);
+ 
++cairo_surface_t *
++cairo_gl_surface_create_for_fbo(cairo_device_t *abstract_device,
++                                cairo_content_t content,
++                                unsigned int fbo,
++                                unsigned int depth_stencil,
++                                int width, int height,
++                                int samples)
++{
++    cairo_gl_context_t *ctx;
++    cairo_gl_surface_t *surface;
++    cairo_status_t status;
++
++    if (! CAIRO_CONTENT_VALID (content))
++        return _cairo_surface_create_in_error (_cairo_error (CAIRO_STATUS_INVALID_CONTENT));
++
++    if (abstract_device == NULL)
++        return _cairo_surface_create_in_error (_cairo_error (CAIRO_STATUS_NULL_POINTER));
++
++    if (abstract_device->status)
++        return _cairo_surface_create_in_error (abstract_device->status);
++
++    if (abstract_device->backend->type != CAIRO_DEVICE_TYPE_GL)
++        return _cairo_surface_create_in_error (_cairo_error (CAIRO_STATUS_DEVICE_TYPE_MISMATCH));
++
++    status = _cairo_gl_context_acquire (abstract_device, &ctx);
++    if (unlikely (status))
++        return _cairo_surface_create_in_error (status);
++
++    if (! _cairo_gl_surface_size_valid_for_context (ctx, width, height)) {
++        status = _cairo_gl_context_release (ctx, status);
++        return _cairo_surface_create_in_error (_cairo_error (CAIRO_STATUS_INVALID_SIZE));
++    }
++
++    surface = (cairo_gl_surface_t *)
++              _cairo_gl_surface_create_scratch_for_fbo (ctx, content,
++                      fbo, depth_stencil, width, height, samples);
++    status = _cairo_gl_context_release (ctx, status);
++
++    return &surface->base;
++}
+ 
+ void
+ cairo_gl_surface_set_size (cairo_surface_t *abstract_surface,
+diff --git a/src/cairo-gl.h b/src/cairo-gl.h
+index 9fd7608..30ab95f 100644
+--- a/src/cairo-gl.h
++++ b/src/cairo-gl.h
+@@ -76,6 +76,15 @@ cairo_gl_surface_create_for_texture (cairo_device_t *abstract_device,
+ 				     cairo_content_t content,
+ 				     unsigned int tex,
+                                      int width, int height);
++
++cairo_public cairo_surface_t *
++cairo_gl_surface_create_for_fbo(cairo_device_t *abstract_device,
++                                cairo_content_t content,
++                                unsigned int fbo,
++                                unsigned int depth_stencil,
++                                int width, int height,
++                                int samples);
++
+ cairo_public void
+ cairo_gl_surface_set_size (cairo_surface_t *surface, int width, int height);
+ 
+@@ -138,6 +147,9 @@ cairo_gl_surface_create_for_egl (cairo_device_t	*device,
+ 				 int		 width,
+ 				 int		 height);
+ 
++cairo_public cairo_device_t *
++cairo_egl_device_create_raw();
++
+ cairo_public EGLDisplay
+ cairo_egl_device_get_display (cairo_device_t *device);
+ 
+-- 
+2.7.4
+

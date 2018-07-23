@@ -1,0 +1,38 @@
+From 770263325f3cad767c3fff437c00ad7878978ec1 Mon Sep 17 00:00:00 2001
+From: Martin Jansa <martin.jansa@lge.com>
+Date: Mon, 28 Dec 2015 00:41:30 -0800
+Subject: [PATCH] wscript: use pkg-config to find EGL, GLESv2 libs
+
+Signed-off-by: Martin Jansa <martin.jansa@lge.com>
+---
+ wscript | 6 ++++--
+ 1 file changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/wscript b/wscript
+index fcbb55b..13d646a 100644
+--- a/wscript
++++ b/wscript
+@@ -119,7 +119,8 @@ def check_x11(conf, uselib = ''):
+ 	conf.check_cxx(mandatory = 1, header_name = 'X11/Xlib.h', uselib = uselib, uselib_store = 'X11')
+ 
+ def check_egl(conf, uselib = ''):
+-	conf.check_cxx(mandatory = 1, lib = 'EGL', uselib = uselib, uselib_store = 'EGL')
++	conf.check_cfg(package = 'egl', uselib_store='EGLPC', args='--libs')
++	conf.check_cxx(mandatory = 1, lib = conf.env.LIB_EGLPC, uselib = uselib, uselib_store = 'EGL')
+ 	conf.check_cxx(mandatory = 1, header_name = 'EGL/egl.h', uselib = uselib, uselib_store = 'EGL')
+ 
+ def check_openvg(conf, uselib = 'EGL'):
+@@ -135,8 +136,9 @@ def check_gles1(conf, uselib = 'EGL', lib_list = ['GLESv1_CM', 'GLESV1_CL']):
+ 	return retval
+ 
+ def check_gles2(conf, uselib = 'EGL', lib_list = ['GLESv2']):
++	conf.check_cfg(package = 'glesv2', uselib_store='GLES2PC', args='--libs')
+ 	retval = \
+-	  check_lib_list(conf = conf, uselib = uselib, uselib_store = 'GLES2', lib_list = lib_list) and \
++	  conf.check_cxx(mandatory = 0, lib = conf.env.LIB_GLES2PC, uselib = uselib, uselib_store = 'GLES2') and \
+ 	  conf.check_cxx(mandatory = 0, header_name = 'GLES2/gl2.h', uselib = uselib, uselib_store = 'GLES2') and \
+ 	  conf.check_cxx(mandatory = 0, header_name = ['GLES2/gl2.h', 'GLES2/gl2ext.h'], uselib = uselib, define_name = 'WITH_GL2EXT_H', uselib_store = 'GLES2') and \
+ 	  check_gccso_shader_binary_def(conf)
+-- 
+1.9.1
+

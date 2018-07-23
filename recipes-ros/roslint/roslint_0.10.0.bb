@@ -11,4 +11,6 @@ S = "${WORKDIR}/${ROS_SP}"
 
 inherit catkin
 
-RDEPENDS_${PN} += "bash"
+VIRTUAL-RUNTIME_bash ?= "bash"
+RDEPENDS_${PN}_append_class-target = " ${VIRTUAL-RUNTIME_bash}"
+RDEPENDS_${PN}_remove = "bash"

@@ -1,0 +1,69 @@
+From 6873d1600caab22e841aca0182d21789768c8ae9 Mon Sep 17 00:00:00 2001
+From: Martin Jansa <martin.jansa@lge.com>
+Date: Thu, 3 Mar 2016 11:50:06 +0000
+Subject: [PATCH 1/2] Fix build with static libraries disabled
+
+:Release Notes:
+
+:Detailed Notes:
+Based on:
+http://git.openembedded.org/openembedded-core/commit/?id=3f935a6e9155e81165e26e94fd6c8504b272441e
+
+When building use the libtool intermediate .lo files instead of explicitly using
+the .o files. Under libtool foo.lo is the libtool intermediate wrapper, foo.o is
+a static build, and .libs/foo.o is a shared build.
+
+If static libraries have been disabled globally then libtool won't generate them
+and explicit references to foo.o won't be satisfied.
+
+:Testing Performed:
+Only build tested.
+
+:QA Notes:
+No change to image.
+
+:Issues Addressed:
+[PLAT-21333] Upgrade to Yocto 2.1 Krogoth
+
+Change-Id: I29dc12c5ad9d3eab9244ce113b99af942f8192e5
+---
+ configure.in | 12 ++++++------
+ 1 file changed, 6 insertions(+), 6 deletions(-)
+
+diff --git a/configure.in b/configure.in
+index 6ceb1bb..b08ff59 100755
+--- a/configure.in
++++ b/configure.in
+@@ -3586,23 +3586,23 @@ done
+ 
+ VERSION_OBJECTS=`echo $VERSION_SOURCES`
+ VERSION_DEPENDS=`echo $VERSION_SOURCES`
+-VERSION_OBJECTS=`echo "$VERSION_OBJECTS" | sed 's,[[^ ]]*/\([[^ ]]*\)\.rc,$(objects)/\1.o,g'`
++VERSION_OBJECTS=`echo "$VERSION_OBJECTS" | sed 's,[[^ ]]*/\([[^ ]]*\)\.rc,$(objects)/\1.lo,g'`
+ VERSION_DEPENDS=`echo "$VERSION_DEPENDS" | sed "s,\\([[^ ]]*\\)/\\([[^ ]]*\\)\\.rc,\\\\
+-\\$(objects)/\\2.o: \\1/\\2.rc\\\\
++\\$(objects)/\\2.lo: \\1/\\2.rc\\\\
+ 	\\$(WINDRES) \\$< \\$@,g"`
+ 
+ SDLMAIN_OBJECTS=`echo $SDLMAIN_SOURCES`
+ SDLMAIN_DEPENDS=`echo $SDLMAIN_SOURCES`
+-SDLMAIN_OBJECTS=`echo "$SDLMAIN_OBJECTS" | sed 's,[[^ ]]*/\([[^ ]]*\)\.c,$(objects)/\1.o,g'`
++SDLMAIN_OBJECTS=`echo "$SDLMAIN_OBJECTS" | sed 's,[[^ ]]*/\([[^ ]]*\)\.c,$(objects)/\1.lo,g'`
+ SDLMAIN_DEPENDS=`echo "$SDLMAIN_DEPENDS" | sed "s,\\([[^ ]]*\\)/\\([[^ ]]*\\)\\.c,\\\\
+-\\$(objects)/\\2.o: \\1/\\2.c\\\\
++\\$(objects)/\\2.lo: \\1/\\2.c\\\\
+ 	\\$(RUN_CMD_CC)\\$(LIBTOOL) --tag=CC --mode=compile \\$(CC) \\$(CFLAGS) \\$(EXTRA_CFLAGS) $DEPENDENCY_TRACKING_OPTIONS -c \\$< -o \\$@,g"`
+ 
+ SDLTEST_OBJECTS=`echo $SDLTEST_SOURCES`
+ SDLTEST_DEPENDS=`echo $SDLTEST_SOURCES`
+-SDLTEST_OBJECTS=`echo "$SDLTEST_OBJECTS" | sed 's,[[^ ]]*/\([[^ ]]*\)\.c,$(objects)/\1.o,g'`
++SDLTEST_OBJECTS=`echo "$SDLTEST_OBJECTS" | sed 's,[[^ ]]*/\([[^ ]]*\)\.c,$(objects)/\1.lo,g'`
+ SDLTEST_DEPENDS=`echo "$SDLTEST_DEPENDS" | sed "s,\\([[^ ]]*\\)/\\([[^ ]]*\\)\\.c,\\\\
+-\\$(objects)/\\2.o: \\1/\\2.c\\\\
++\\$(objects)/\\2.lo: \\1/\\2.c\\\\
+ 	\\$(RUN_CMD_CC)\\$(LIBTOOL) --tag=CC --mode=compile \\$(CC) \\$(CFLAGS) \\$(EXTRA_CFLAGS) $DEPENDENCY_TRACKING_OPTIONS -c \\$< -o \\$@,g"`
+ 
+ # Set runtime shared library paths as needed
+-- 
+1.9.1
+

@@ -6,5 +6,5 @@ LIC_FILES_CHKSUM = "file://package.xml;beginline=20;endline=20;md5=01c2bc31767cc
 
 DEPENDS = "base-local-planner costmap-2d dynamic-reconfigure libeigen nav-core \
     nav-msgs pluginlib pcl-conversions roscpp tf"
-
+LDFLAGS += "-lpthread"
 require navigation.inc
